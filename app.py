@@ -4,6 +4,8 @@ import tempfile
 from groq import Groq
 import json
 import logging
+import pyperclip
+
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -68,8 +70,41 @@ def transcribe_audio(audio_file, language):
     
     return transcription.text
 
+def translate_text(text, target_language):
+    prompt = f"Translate the following text to {target_language}:\n\n{text}\n\nTranslation:"
+    
+    try:
+        completion = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that translates text accurately."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=4000,
+        )
+        return completion.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Error occurred during translation: {str(e)}")
+        raise
+
+def copy_to_clipboard(text):
+    pyperclip.copy(text)
+    st.success("Copied to clipboard!")
+
 def main():
-    st.title("M4A File Transcription and Translation App")
+    st.set_page_config(page_title="Groq Whisper: M4A Transcription & Translation", layout="wide")
+    st.title("Groq Whisper: M4A Transcription & Translation")
+
+    # Initialize session state variables
+    if 'transcription' not in st.session_state:
+        st.session_state.transcription = None
+    if 'translation' not in st.session_state:
+        st.session_state.translation = None
+    if 'transcription_language' not in st.session_state:
+        st.session_state.transcription_language = None
+    if 'target_language' not in st.session_state:
+        st.session_state.target_language = None
 
     # Display debug information
     st.sidebar.subheader("Debug Information")
@@ -81,6 +116,7 @@ def main():
         list(LANGUAGES.keys()),
         key="transcription_language_select"
     )
+    st.session_state.transcription_language = transcription_language
 
     # File upload widget
     uploaded_file = st.file_uploader("Upload your M4A file", type=["m4a"])
@@ -103,9 +139,8 @@ def main():
                     transcription = transcribe_audio(uploaded_file, LANGUAGES[transcription_language])
                     logger.debug("Transcription process completed successfully")
                 
+                st.session_state.transcription = transcription
                 st.success("Transcription completed!")
-                st.markdown("### Transcription Result")
-                st.markdown(transcription)
 
                 # Update debug information
                 debug_info.json({
@@ -115,10 +150,53 @@ def main():
                     "transcription_length": len(transcription),
                     "transcription_word_count": len(transcription.split())
                 })
-
             except Exception as e:
-                st.error(f"An error occurred: {str(e)}")
+                st.error(f"An error occurred during transcription: {str(e)}")
                 logger.exception("Error in transcription process")
+        # Display transcription result
+        if st.session_state.transcription:
+            st.markdown("### Transcription Result")
+            st.text_area("Transcription", st.session_state.transcription, height=200)
+            if st.button("Copy Transcription", key="copy_transcription"):
+                copy_to_clipboard(st.session_state.transcription)
+
+            # Translation section
+            st.markdown("### Translate Transcription")
+            
+            # Filter out the transcription language from target language options
+            target_languages = [lang for lang in LANGUAGES.keys() if lang != st.session_state.transcription_language]
+            
+            col1, col2 = st.columns([1, 6])
+            
+            with col1:
+                translate_button = st.button("Translate", key="translate_button")
+            
+            with col2:
+                target_language = st.selectbox(
+                    "",
+                    target_languages,
+                    key="translation_language_select",
+                    label_visibility="collapsed"  
+                )
+            
+            st.session_state.target_language = target_language
+
+            if translate_button:
+                try:
+                    with st.spinner("Translating... This may take a moment."):
+                        translated_text = translate_text(st.session_state.transcription, target_language)
+                    
+                    st.session_state.translation = translated_text
+                except Exception as e:
+                    st.error(f"An error occurred during translation: {str(e)}")
+                    logger.exception("Error in translation process")
+
+            # Display translation result
+            if st.session_state.translation:
+                st.markdown("### Translation Result")
+                st.text_area("Translation", st.session_state.translation, height=200)
+                if st.button("Copy Translation", key="copy_translation"):
+                    copy_to_clipboard(st.session_state.translation)
 
 if __name__ == "__main__":
     main()
