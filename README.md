@@ -1,6 +1,9 @@
-# Groq Whisper: M4A File Transcription and Translation App
+# Groq Whisper: M4A File Transcription and Translation Streamlit App
 
 This Streamlit application allows users to upload M4A audio files, transcribe them using the Groq API with the Whisper model, and translate the transcriptions to multiple languages.
+
+![Groq Whisper App Screenshot](screenshots/app_screenshot.png)
+
 
 ## Features
 
