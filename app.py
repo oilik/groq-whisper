@@ -2,7 +2,6 @@ import streamlit as st
 import os
 import tempfile
 from groq import Groq
-import google.generativeai as genai
 import json
 import logging
 import pyperclip
@@ -12,7 +11,6 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # --- Constants ---
-# Constants
 LANGUAGES = {
     "English": "en",
     "Turkish": "tr",
@@ -22,8 +20,8 @@ LANGUAGES = {
     "Italian": "it",
     "Dutch": "nl"
 }
+
 # --- API Configuration ---
-# API Configuration
 def configure_apis():
     # Groq API
     GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -31,36 +29,9 @@ def configure_apis():
         st.error("GROQ_API_KEY environment variable not found. Please set your API key.")
         st.stop()
     groq_client = Groq(api_key=GROQ_API_KEY)
+    return groq_client
 
-    # Google API
-    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-    genai.configure(api_key=GOOGLE_API_KEY)
-
-    generation_config = {
-        "temperature": 1,
-        "top_p": 0.95,
-        "top_k": 64,
-        "max_output_tokens": 8192,
-    }
-
-    safety_settings = [
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-    ]
-
-    MODEL_NAME = "gemini-1.5-flash-001"
-
-    google_model = genai.GenerativeModel(
-        model_name=MODEL_NAME,
-        generation_config=generation_config,
-        safety_settings=safety_settings,
-    )
-
-    return groq_client, google_model
 # --- Transcription ---
-# Transcription
 def transcribe_audio(groq_client, audio_file, language="en"):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".m4a") as tmp_file:
         tmp_file.write(audio_file.read())
@@ -93,49 +64,23 @@ def transcribe_audio(groq_client, audio_file, language="en"):
         logger.debug(f"Temporary file deleted: {tmp_file_path}")
     
     return transcription.text
-# --- Translation ---
-# Translation
-def translate_text(google_model, text, transcription_language, target_language):
-    system_instruction = [
-        f"You are a helpful language translator.",
-        f"Your mission is to translate text from {transcription_language} to {target_language}.",
-        "Ensure that the translation maintains the original meaning, tone, and style as much as possible.",
-        "If there are any cultural nuances or idiomatic expressions, try to find appropriate equivalents in the target language."
-    ]
 
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash-latest",
-        system_instruction=system_instruction,
-    )
-    
-    prompt = f"""{text}"""
-    
-    try:
-        response = model.generate_content(prompt)
-        logger.debug(f"Translation response: {response.text}")
-        return response.text.strip()
-    except Exception as e:
-        logger.error(f"Error occurred during translation: {str(e)}")
-        raise
 # --- Utility Functions ---
 def copy_to_clipboard(text):
     pyperclip.copy(text)
     st.success("Copied to clipboard!")
 
 # --- Main Application ---
-# Main application
 def main():
-    st.set_page_config(page_title="Groq Whisper: M4A Transcription & Translation", layout="wide")
-    st.title("Groq Whisper: M4A Transcription & Translation")
+    st.set_page_config(page_title="Groq Whisper: M4A/MP3 Transcription", layout="wide")
+    st.title("Groq Whisper: M4A/MP3 Transcription")
 
     # Initialize APIs
-    groq_client, google_model = configure_apis()
+    groq_client = configure_apis()
 
     # Initialize session state
     if 'transcription' not in st.session_state: st.session_state.transcription = None
-    if 'translation' not in st.session_state: st.session_state.translation = None
     if 'transcription_language' not in st.session_state: st.session_state.transcription_language = None
-    if 'target_language' not in st.session_state: st.session_state.target_language = None
     
     # --- Sidebar: Debug Information ---
     st.sidebar.subheader("Debug Information")
@@ -145,10 +90,11 @@ def main():
     st.session_state.transcription_language = st.selectbox("Select transcription language", list(LANGUAGES.keys()), key="transcription_language_select")
 
     # --- File Upload ---
-    uploaded_file = st.file_uploader("Upload your M4A file", type=["m4a"])
+    uploaded_file = st.file_uploader("Upload your M4A or MP3 file", type=["m4a", "mp3"])
 
     if uploaded_file:
-        st.audio(uploaded_file, format="audio/m4a")
+        file_format = uploaded_file.name.split(".")[-1]
+        st.audio(uploaded_file, format=f"audio/{file_format}")
         st.write(f"Uploaded file: {uploaded_file.name}, Size: {uploaded_file.size} bytes")
 
         debug_info.json({"file_name": uploaded_file.name, "file_size": uploaded_file.size, "transcription_language": st.session_state.transcription_language})
@@ -174,38 +120,6 @@ def main():
             st.markdown("### Transcription Result")
             st.text_area("Transcription", st.session_state.transcription, height=200)
             if st.button("Copy Transcription", key="copy_transcription"): copy_to_clipboard(st.session_state.transcription)
-
-            # --- Translation Section ---
-            st.markdown("### Translate Transcription")
-            
-            target_languages = [lang for lang in LANGUAGES.keys() if lang != st.session_state.transcription_language]
-            
-            col1, col2 = st.columns([1, 6])
-            
-            with col1:
-                translate_button = st.button("Translate", key="translate_button")
-            
-            with col2:
-                st.session_state.target_language = st.selectbox("", target_languages,
-                    key="translation_language_select",
-                    label_visibility="collapsed"  
-                )
-
-            if translate_button:
-                try:
-                    with st.spinner("Translating... This may take a moment."):
-                        translated_text = translate_text(google_model, st.session_state.transcription, st.session_state.transcription_language, st.session_state.target_language)
-                    
-                    st.session_state.translation = translated_text
-                except Exception as e:
-                    st.error(f"An error occurred during translation: {str(e)}")
-                    logger.exception("Error in translation process")
-
-            # --- Display Translation Result ---
-            if st.session_state.translation:
-                st.markdown("### Translation Result")
-                st.text_area("Translation", st.session_state.translation, height=200)
-                if st.button("Copy Translation", key="copy_translation"): copy_to_clipboard(st.session_state.translation)
 
 if __name__ == "__main__":
     main()
